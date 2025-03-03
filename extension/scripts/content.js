@@ -6,6 +6,7 @@ document.addEventListener('turbo:render', init);
 function init() {
   injectSingleIssueUI();
   injectIssueListUI();
+  injectConversationUI();
 }
 
 /**
@@ -711,4 +712,107 @@ function getLinkedIssues() {
     .filter(
       /** @type {<T>(arg: T) => arg is NonNullable<T>} */ ((a) => Boolean(a))
     );
+}
+
+/**
+ * Inject Linear buttons into GitHub conversation threads
+ */
+async function injectConversationUI() {
+  const conversations = document.querySelectorAll('.review-thread-component');
+
+  for (const conversation of conversations) {
+    // Skip if we already added any Linear button in this conversation
+    if (conversation.querySelectorAll('.gh2l-conversation-button').length > 0) continue;
+
+    const resolveButton = conversation.querySelector('.review-thread-reply-button');
+    if (!resolveButton) continue;
+
+    // Get the comment link from the form action URL
+    const commentForm = conversation.querySelector('form.js-comment-update');
+    const commentId = commentForm?.action.match(/review_comment\/(\d+)/)?.[1];
+    const commentLink = commentId ? `${window.location.origin}${window.location.pathname}#r${commentId}` : null;
+    if (!commentLink) continue;
+
+    // Get issue metadata for creating Linear issue
+    const issueMetaData = parseGitHubUrl(location);
+    if (!issueMetaData) continue;
+
+    const identifier = makeGitHubIdentifier(issueMetaData);
+    const title = `${identifier} - Code Review Comment`;
+    const description = `GitHub Comment: ${commentLink}`;
+    const newIssueUrl = await getNewIssueUrl(title, description);
+
+    // Create Linear button
+    const linearButton = h(
+      'button',
+      {
+        class: 'gh2l-conversation-button btn btn-sm ml-1',
+        style: 'white-space: nowrap;',
+      },
+      h(
+        'span',
+        { class: 'gh2l-icon-text-lockup' },
+        LinearLogo(),
+        'Add to Linear'
+      )
+    );
+
+    // Add click handler
+    linearButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.open(newIssueUrl, '_blank');
+    });
+
+    // Insert button next to resolve button
+    resolveButton.insertAdjacentElement('afterend', linearButton);
+  }
+}
+
+// Add observer to handle dynamically loaded conversations
+const observer = new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    if (mutation.addedNodes.length) {
+      // When new nodes are added, check for new comments
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // If the added node is a comment
+          if (node.matches('.timeline-comment')) {
+            addLinearButtonToComment(node);
+          }
+          // If the added node contains comments
+          const comments = node.querySelectorAll('.timeline-comment');
+          comments.forEach(comment => {
+            addLinearButtonToComment(comment);
+          });
+        }
+      });
+    }
+  }
+});
+
+// Start observing after initial injection
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+});
+
+function createLinearButton() {
+  const button = document.createElement('button');
+  button.className = 'add-to-linear-button btn-link timeline-comment-action';
+  // ... rest of button creation code ...
+  return button;
+}
+
+function addLinearButtonToComment(comment) {
+  // Check if button already exists in this comment
+  if (comment.querySelector('.add-to-linear-button')) {
+    return;
+  }
+
+  const actionsContainer = comment.querySelector('.timeline-comment-actions');
+  if (!actionsContainer) return;
+
+  // Create and add the button
+  const linearButton = createLinearButton();
+  actionsContainer.insertBefore(linearButton, actionsContainer.firstChild);
 }
